@@ -87,7 +87,7 @@ app.post("/messages", async (req, res) => {
     });
 
     if (!participantExist) {
-      return res.status(422).send("Participante não cadastrado!");
+      return res.status(404).send("Participante não cadastrado!");
     }
 
     const messageSchema = joi.object({
@@ -163,7 +163,7 @@ app.post("/status", async (req, res) => {
     res.sendStatus(200);
   } catch (err) {
     console.log(err);
-    res.sendStatus(201);
+    res.sendStatus(500);
   }
 });
 
