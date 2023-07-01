@@ -1,4 +1,4 @@
-import express from "express";
+import express, { json } from "express";
 import cors from "cors";
 import { MongoClient, ObjectId } from "mongodb";
 import dotenv from "dotenv";
@@ -10,20 +10,19 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(json());
 
-const mongoClient = new MongoClient(process.env.DATABASE_URL);
+const mongoClient = new MongoClient(process.env.MONGO_URI);
 
 try {
   await mongoClient.connect();
 } catch (err) {
   console.log(err);
-  process.exit(1);
 }
 
-const db = mongoClient.db();
+const db = mongoClient.db("uolDatabase");
 const participantsCollection = db.collection("participants");
-const messagesCollection = db.collection("messages");
+const messageCollection = db.collection("messages");
 
 app.post("/participants", async (req, res) => {
   const promptSchema = joi.object({
@@ -38,56 +37,57 @@ app.post("/participants", async (req, res) => {
   const username = req.body.name;
 
   try {
-    const participantExist = await participantsCollection.findOne({
+    const participantExists = await participantsCollection.findOne({
       name: username,
     });
 
-    if (participantExist) {
+    if (participantExists) {
       res.sendStatus(409);
       return;
     }
-
     await participantsCollection.insertOne({
       name: username,
       lastStatus: Date.now(),
     });
-
-    await messagesCollection.insertOne({
+    await messageCollection.insertOne({
       from: username,
       to: "Todos",
-      text: "entra na sala...",
+      text: "entra na sala..",
       type: "status",
       time: dayjs().format("HH:mm:ss"),
     });
-
     res.sendStatus(201);
   } catch (err) {
     console.log(err);
-    res.sendStatus(500);
   }
 });
 
 app.get("/participants", async (req, res) => {
   try {
-    const participants = await participantsCollection.find().toArray();
-    res.send(participants);
+    const participantsCollection = db.collection("participants");
+    res.send(await participantsCollection.find().toArray());
   } catch (err) {
     console.log(err);
-    res.status(500).send("Não foi possível retornar a lista de participantes.");
+    res
+      .status(422)
+      .send(
+        "Não foi possível retornar a lista de participantes. Consulte os logs."
+      );
   }
 });
 
 app.post("/messages", async (req, res) => {
   const { to, text, type } = req.body;
+
   const { user } = req.headers;
 
   try {
-    const participantExist = await participantsCollection.findOne({
+    const participantExists = await participantsCollection.findOne({
       name: user,
     });
 
-    if (!participantExist) {
-      return res.status(404).send("Participante não cadastrado!");
+    if (!participantExists) {
+      return res.status(422).send("Participante não existe!");
     }
 
     const messageSchema = joi.object({
@@ -102,44 +102,46 @@ app.post("/messages", async (req, res) => {
       return res.status(422).send("Erro na composição da mensagem!");
     }
 
-    await messagesCollection.insertOne({
+    await messageCollection.insertOne({
       to: to,
       text: text,
       type: type,
       from: user,
       time: dayjs().format("HH:mm:ss"),
     });
-
-    res.sendStatus(422);
+    res.sendStatus(201);
   } catch (err) {
     console.log(err);
-    res.sendStatus(500);
+    res.sendStatus(400);
   }
 });
 
 app.get("/messages", async (req, res) => {
+  const limit = req.query.limit;
   const { user } = req.headers;
-  const limit = parseInt(req.query.limit);
 
   try {
-    const messages = await messagesCollection
-      .find({
-        $or: [
-          { type: "message" },
-          { type: "status" },
-          {
-            type: "private_message",
-            $or: [{ to: user }, { from: user }],
-          },
-        ],
-      })
-      .limit(limit)
-      .toArray();
-
-    res.send(messages);
+    const messages = await messageCollection.find().toArray();
+    const filteredMessages = messages.filter((m) => {
+      if (
+        m.type === "message" ||
+        m.type === "status" ||
+        (m.type === "private_message" && (m.to === user || m.from === user))
+      ) {
+        return m;
+      }
+    });
+    if (!limit) {
+      return res.send(filteredMessages);
+    }
+    res.send(filteredMessages);
   } catch (err) {
     console.log(err);
-    res.status(500).send("Não foi possível retornar a lista de mensagens.");
+    res
+      .status(422)
+      .send(
+        "Não foi possível retornar a lista de mensagens. Consulte os logs."
+      );
   }
 });
 
@@ -147,58 +149,49 @@ app.post("/status", async (req, res) => {
   const { user } = req.headers;
 
   try {
-    const participantExist = await participantsCollection.findOne({
+    const participantExists = await participantsCollection.findOne({
       name: user,
     });
-
-    if (!participantExist) {
+    if (!participantExists) {
       return res.status(404).send("Participante não cadastrado!");
     }
-
     await participantsCollection.updateOne(
-      { _id: ObjectId(participantExist._id) },
+      { _id: ObjectId(participantExists._id) },
       { $set: { lastStatus: Date.now() } }
     );
-
     res.sendStatus(200);
   } catch (err) {
     console.log(err);
-    res.sendStatus(500);
+    res.send(
+      "Não foi possível mostrar o status desse usuário. Consulte os logs."
+    );
   }
 });
 
-setInterval(deleteInactives, 15000);
+setInterval(deleteInatives, 15000);
 
-async function deleteInactives() {
-  try {
-    const allUsers = await participantsCollection.find().toArray();
+async function deleteInatives() {
+  const allUsers = await participantsCollection.find().toArray();
 
-    allUsers.forEach(async (user) => {
-      if (!user.name) {
-        return;
-      }
-
-      if (user.lastStatus <= Date.now() - 10000) {
-        await participantsCollection.deleteOne({
-          _id: ObjectId(user._id),
-        });
-
-        await messagesCollection.insertOne({
-          from: user.name,
-          to: "Todos",
-          text: "sai da sala...",
-          type: "status",
-          time: dayjs().format("HH:mm:ss"),
-        });
-      }
-    });
-  } catch (err) {
-    console.log(err);
-  }
+  allUsers.forEach(async (u) => {
+    if (!u.name) {
+      return;
+    }
+    if (u.lastStatus <= Date.now() - 10000) {
+      await participantsCollection.deleteOne({
+        _id: ObjectId(u._id),
+      });
+      await messageCollection.insertOne({
+        from: u.name,
+        to: "Todos",
+        text: "sai da sala...",
+        type: "status",
+        time: dayjs().format("HH:mm:ss"),
+      });
+    }
+  });
 }
 
-const port = process.env.PORT || 5000;
-
-app.listen(port, () => {
-  console.log(`O servidor está sendo executado na porta ${port}`);
+app.listen(5000, () => {
+  console.log("Server is running in port 5000");
 });
