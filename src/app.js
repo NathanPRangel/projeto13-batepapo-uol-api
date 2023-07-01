@@ -110,7 +110,7 @@ app.post("/messages", async (req, res) => {
       time: dayjs().format("HH:mm:ss"),
     });
 
-    res.sendStatus(201);
+    res.sendStatus(422);
   } catch (err) {
     console.log(err);
     res.sendStatus(500);
@@ -163,7 +163,7 @@ app.post("/status", async (req, res) => {
     res.sendStatus(200);
   } catch (err) {
     console.log(err);
-    res.sendStatus(500);
+    res.sendStatus(201);
   }
 });
 
