@@ -1,209 +1,175 @@
 import express from "express";
 import cors from "cors";
-import { MongoClient, ObjectId } from "mongodb";
-import dotenv from "dotenv";
-import joi from "joi";
-import dayjs from "dayjs";
+import chalk from "chalk"
+import { MongoClient } from "mongodb";
+import dotenv from 'dotenv'
+import joi from 'joi'
+import dayjs from 'dayjs'
 
-dayjs.locale("br");
-dotenv.config();
+dotenv.config()
+
+const mongoClient = new MongoClient(process.env.DATABASE_URL);
+let db;
+
+try {
+  mongoClient.connect()
+  db = mongoClient.db();
+  console.log('Conectou com o mongodb!')
+} catch (error) {
+  console.log('Deu erro no banco de dados!')
+}
+
 
 const app = express();
+const time = Date.now();
+const timestamp = dayjs(time).format("HH:mm:ss");
+
+
 app.use(cors());
 app.use(express.json());
 
-const mongoClient = new MongoClient(process.env.DATABASE_URL);
-
-try {
-  await mongoClient.connect();
-} catch (err) {
-  console.log(err);
-  process.exit(1);
-}
-
-const db = mongoClient.db();
-const participantsCollection = db.collection("participants");
-const messagesCollection = db.collection("messages");
-
 app.post("/participants", async (req, res) => {
-  const promptSchema = joi.object({
-    name: joi.string().required(),
-  });
-  const { error } = promptSchema.validate(req.body);
-  if (error) {
-    res.sendStatus(422);
-    return;
-  }
 
-  const username = req.body.name;
+  const usuario = req.body;
+
+  const usuarioSchema = joi.object({ name: joi.string().required() })
+
+  const validation = usuarioSchema.validate(usuario)
+  if (validation.error) return res.status(422).send('Preencha o campo com nome!')
 
   try {
-    const participantExist = await participantsCollection.findOne({
-      name: username,
-    });
+    const usuarioExiste = await db.collection("participants").findOne({ name: usuario.name })
+    if (usuarioExiste) return res.status(409).send("Esse usuário já existe")
 
-    if (participantExist) {
-      res.sendStatus(409);
-      return;
-    }
 
-    await participantsCollection.insertOne({
-      name: username,
-      lastStatus: Date.now(),
-    });
-
-    await messagesCollection.insertOne({
-      from: username,
+    await db.collection("participants").insertOne({ name: usuario.name, lastStatus: time })
+    await db.collection("messages").insertOne({
+      from: usuario.name,
       to: "Todos",
       text: "entra na sala...",
       type: "status",
-      time: dayjs().format("HH:mm:ss"),
+      time: timestamp,
     });
 
-    res.sendStatus(201);
+    return res.status(201).send("Usuário Registrado!");
+
   } catch (err) {
-    console.log(err);
-    res.sendStatus(500);
+    return res.status(500).send(err.message)
   }
-});
+})
 
 app.get("/participants", async (req, res) => {
-  try {
-    const participants = await participantsCollection.find().toArray();
-    res.send(participants);
-  } catch (err) {
-    console.log(err);
-    res.status(500).send("Não foi possível retornar a lista de participantes.");
-  }
-});
+  const usuarios = await db.collection("participants").find().toArray()
+
+  return res.status(200).send(usuarios)
+
+})
 
 app.post("/messages", async (req, res) => {
+
   const { to, text, type } = req.body;
-  const { user } = req.headers;
+  let { user } = req.headers;
+
+  const mensagemSchema = joi.object({
+    to: joi.string().required(),
+    text: joi.string().required(),
+    type: joi.string().required().valid("message", "private_message"),
+    from: joi.string().required()
+
+  })
+
+  const validation = mensagemSchema.validate({ to, text, type, from: user })
+  if (validation.error) return res.status(422).send()
+
+  const usuarioExiste = await db.collection("participants").findOne({ name: user })
+  if (!usuarioExiste) return res.status(422).send("Esse usuário não existe")
 
   try {
-    const participantExist = await participantsCollection.findOne({
-      name: user,
-    });
-
-    if (!participantExist) {
-      return res.status(422).send("Participante não cadastrado!");
-    }
-
-    const messageSchema = joi.object({
-      to: joi.string().required(),
-      text: joi.string().required(),
-      type: joi.string(),
-    });
-
-    const { error } = messageSchema.validate(req.body);
-
-    if (error) {
-      return res.status(422).send("Erro na composição da mensagem!");
-    }
-
-    await messagesCollection.insertOne({
-      to: to,
-      text: text,
-      type: type,
+    await db.collection("messages").insertOne({
       from: user,
-      time: dayjs().format("HH:mm:ss"),
-    });
-    
-    res.sendStatus(201);    
-  } catch (err) {
-    console.log(err);
-    res.sendStatus(500);
-  }
-});
+      to,
+      text,
+      type,
+      time: timestamp
 
+    })
+    return res.status(201).send("Mensagem enviada")
+
+  } catch (err) {
+    res.status(422).send("Deu algo errado no servidor!")
+  }
+})
 
 app.get("/messages", async (req, res) => {
-  const { user } = req.headers;
-  const limit = parseInt(req.query.limit);
+  const limite=req.query.limit;
+  const {user}=req.headers;
 
-  if (limit < 0) {
-    return res.status(422).send("Valor inválido para o parâmetro 'limit'.");
-  }
+  try{
+      const mensagens = await db.collection("messages").find({ $or: [{ from: user }, { to: "Todos" }, { to: user }] }).toArray();
+      
+      if (!limite) return res.send(mensagens);
+      
+      if (limite > 0 && parseInt(limite)!== "NaN") {
+          const dados = mensagens.reverse().slice(0, parseInt(limite));
+          return res.send(dados);
+      }else{
+          return res.sendStatus(422);
+      }
+      
+  }catch(error){
+      res.status(500).send(error.message);
+  } 
 
-  try {
-    const messages = await messagesCollection
-      .find({
-        $or: [
-          { type: "message" },
-          { type: "status" },
-          {
-            type: "private_message",
-            $or: [{ to: user }, { from: user }],
-          },
-        ],
-      })
-      .limit(limit)
-      .toArray();
-
-    res.send(messages);
-  } catch (err) {
-    console.log(err);
-    res.status(500).send("Não foi possível retornar a lista de mensagens.");
-  }
-});
+})
 
 app.post("/status", async (req, res) => {
-  const { user } = req.headers;
+  
+  let { user } = req.headers;
+
+  const usuarioExiste = await db.collection("participants").findOne({ name: user })
+  if (!usuarioExiste){ return res.status(404).send("Usuario não existe")}
 
   try {
-    const participantExist = await participantsCollection.findOne({
-      name: user,
-    });
+    await db.collection("participants").updateOne(
+      { name: user },
+      { $set: { lastStatus: Date.now() }});
 
-    if (!participantExist) {
-      return res.status(404).send("Participante não cadastrado!");
-    }
+    return res.status(200).send();
 
-    await participantsCollection.updateOne(
-      { _id: ObjectId(participantExist._id) },
-      { $set: { lastStatus: Date.now() } }
-    );
-
-    res.sendStatus(200);
-  } catch (err) {
-    console.log(err);
-    res.sendStatus(201);
+  } catch {
+    return res.status(422).send();
   }
-});
+})
 
-setInterval(deleteInactives, 15000);
+setInterval(async ()=>{
+  const segundos =Date.now()-10000;
 
-async function deleteInactives() {
-  try {
-    const allUsers = await participantsCollection.find().toArray();
+  try{
+      const inativos=await db.collection("participants").find({lastStatus: {$lte: segundos}}).toArray();
 
-    allUsers.forEach(async (user) => {
-      if (!user.name) {
-        return;
+      if(inativos.length>0){
+          const msgInativos=inativos.map(
+              (inativo)=>{
+                  return {
+                      from: inativo.name,
+                      to: "Todos",
+                      text: "sai da sala...",
+                      type: "status",
+                      time: dayjs().format("HH:mm:ss")
+                  };
+
+              }
+          );
+
+          await db.collection("messages").insertMany(msgInativos);
+          await db.collection("participants").deleteMany({lastStatus: {$lte: segundos}});
       }
-
-      if (user.lastStatus <= Date.now() - 10000) {
-        await participantsCollection.deleteOne({
-          _id: ObjectId(user._id),
-        });
-
-        await messagesCollection.insertOne({
-          from: user.name,
-          to: "Todos",
-          text: "sai da sala...",
-          type: "status",
-          time: dayjs().format("HH:mm:ss"),
-        });
-      }
-    });
-  } catch (err) {
-    console.log(err);
+  }catch(error){
+      res.status(500).send(error.message);
   }
-}
+},15000);
 
-const port = process.env.PORT || 5000;
 
-app.listen(port, () => {
-  console.log(`O servidor está sendo executado na porta ${port}`);
-});
+app.listen(5000, () => {
+  console.log(chalk.blue('Servidor Funcionando na porta 5000'));
+})
