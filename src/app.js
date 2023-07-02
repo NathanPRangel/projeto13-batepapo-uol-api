@@ -1,4 +1,4 @@
-import express, { json } from "express";
+import express from "express";
 import cors from "cors";
 import { MongoClient, ObjectId } from "mongodb";
 import dotenv from "dotenv";
@@ -10,7 +10,7 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(json());
+app.use(express.json());
 
 const mongoURI = process.env.DATABASE_URL;
 const mongoClient = new MongoClient(mongoURI);
@@ -24,6 +24,7 @@ try {
 const db = mongoClient.db("uolDatabase");
 const participantsCollection = db.collection("participants");
 const messageCollection = db.collection("messages");
+
 
 app.post("/participants", async (req, res) => {
   const promptSchema = joi.object({
@@ -65,7 +66,6 @@ app.post("/participants", async (req, res) => {
 
 app.get("/participants", async (req, res) => {
   try {
-    const participantsCollection = db.collection("participants");
     res.send(await participantsCollection.find().toArray());
   } catch (err) {
     console.log(err);
@@ -193,6 +193,11 @@ async function deleteInactives() {
       });
     }
   });
+}
+
+// Verifica e cria a coleção "participants" se ela não existir
+if (!(await participantsCollection.countDocuments())) {
+  await db.createCollection("participants");
 }
 
 app.listen(5000, () => {
