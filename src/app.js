@@ -109,8 +109,8 @@ app.post("/messages", async (req, res) => {
       from: user,
       time: dayjs().format("HH:mm:ss"),
     });
-
-    res.sendStatus(422);
+    
+    res.sendStatus(201);    
   } catch (err) {
     console.log(err);
     res.sendStatus(500);
