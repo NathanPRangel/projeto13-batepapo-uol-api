@@ -22,7 +22,7 @@ try {
   console.log(err);
 }
 
-const db = mongoClient.db("uolDatabase");
+const db = mongoClient.db();
 const participantsCollection = db.collection("participants");
 const messageCollection = db.collection("messages");
 
