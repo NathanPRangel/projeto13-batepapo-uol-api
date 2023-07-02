@@ -12,7 +12,7 @@ const app = express();
 app.use(cors());
 app.use(json());
 
-const mongoURI = process.env.MONGO_URI;
+const mongoURI = process.env.DATABASE_URL;
 const mongoClient = new MongoClient(mongoURI);
 
 
