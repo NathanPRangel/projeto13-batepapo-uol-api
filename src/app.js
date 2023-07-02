@@ -15,14 +15,13 @@ app.use(json());
 const mongoURI = process.env.DATABASE_URL;
 const mongoClient = new MongoClient(mongoURI);
 
-
 try {
   await mongoClient.connect();
 } catch (err) {
   console.log(err);
 }
 
-const db = mongoClient.db();
+const db = mongoClient.db("uolDatabase");
 const participantsCollection = db.collection("participants");
 const messageCollection = db.collection("messages");
 
@@ -174,7 +173,7 @@ app.post("/status", async (req, res) => {
 
 setInterval(deleteInactives, 15000);
 
-async function deleteInatives() {
+async function deleteInactives() {
   const allUsers = await participantsCollection.find().toArray();
 
   allUsers.forEach(async (u) => {
@@ -197,5 +196,5 @@ async function deleteInatives() {
 }
 
 app.listen(5000, () => {
-  console.log("Server is running in port 5000");
+  console.log("Server is running on port 5000");
 });
