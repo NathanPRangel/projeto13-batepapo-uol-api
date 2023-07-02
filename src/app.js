@@ -122,6 +122,10 @@ app.get("/messages", async (req, res) => {
   const { user } = req.headers;
   const limit = parseInt(req.query.limit);
 
+  if (limit < 0) {
+    return res.status(422).send("Valor inválido para o parâmetro 'limit'.");
+  }
+
   try {
     const messages = await messagesCollection
       .find({
