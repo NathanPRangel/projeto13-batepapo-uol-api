@@ -12,7 +12,9 @@ const app = express();
 app.use(cors());
 app.use(json());
 
-const mongoClient = new MongoClient(process.env.MONGO_URI);
+const mongoURI = process.env.MONGO_URI;
+const mongoClient = new MongoClient(mongoURI);
+
 
 try {
   await mongoClient.connect();
@@ -121,20 +123,21 @@ app.get("/messages", async (req, res) => {
   const { user } = req.headers;
 
   try {
-    const messages = await messageCollection.find().toArray();
-    const filteredMessages = messages.filter((m) => {
-      if (
-        m.type === "message" ||
-        m.type === "status" ||
-        (m.type === "private_message" && (m.to === user || m.from === user))
-      ) {
-        return m;
-      }
-    });
+    const messages = await messageCollection
+      .find({
+        $or: [
+          { type: "message" },
+          { type: "status" },
+          { type: "private_message", $or: [{ to: user }, { from: user }] },
+        ],
+      })
+      .toArray();
+
     if (!limit) {
-      return res.send(filteredMessages);
+      return res.send(messages);
     }
-    res.send(filteredMessages);
+
+    res.send(messages);
   } catch (err) {
     console.log(err);
     res
@@ -144,6 +147,7 @@ app.get("/messages", async (req, res) => {
       );
   }
 });
+
 
 app.post("/status", async (req, res) => {
   const { user } = req.headers;
@@ -168,7 +172,7 @@ app.post("/status", async (req, res) => {
   }
 });
 
-setInterval(deleteInatives, 15000);
+setInterval(deleteInactives, 15000);
 
 async function deleteInatives() {
   const allUsers = await participantsCollection.find().toArray();
